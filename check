@@ -1,0 +1,25 @@
+#!/bin/bash
+
+set -ueo pipefail
+
+exec 3>&1 # make stdout available as fd 3 for the result
+exec 1>&2 # redirect all output to stderr for logging
+
+payload=$(cat <&0)
+
+source_system=$(jq -er '.source.system' <<< "${payload}")
+source_architecture=$(jq -er '.source.architecture' <<< "${payload}")
+source_distribution=$(jq -er '.source.distribution' <<< "${payload}")
+
+releases="$(curl -s https://www.mongodb.com/download-center/community/releases \
+    | tr '<' '\n' \
+    | sed -ne 's|^.*href="\([^"]*mongodb-[^"]*\.tgz\)">.*|\1|p')"
+
+latest_version="$(echo "$releases" | sed -ne 's|.*mongodb-'"${source_system}-${source_architecture}-${source_distribution}"'-\([0-9.]\{1,\}\)\.tgz.*|\1|p' | sort -r | head -n1)"
+
+>&2 echo "Latest version ${latest_version}"
+
+jq --null-input \
+    --arg "version" "${latest_version}" \
+    '[ { version: $version } ]' \
+    >&3

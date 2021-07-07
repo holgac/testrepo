@@ -1,0 +1,45 @@
+#!/bin/bash
+
+set -ueo pipefail
+
+exec 3>&1 # make stdout available as fd 3 for the result
+exec 1>&2 # redirect all output to stderr for logging
+
+destination=$1
+
+payload=$(cat <&0)
+
+version=$(jq -e --raw-output '.version.version' <<< "${payload}")
+source_system=$(jq -er '.source.system' <<< "${payload}")
+source_architecture=$(jq -er '.source.architecture' <<< "${payload}")
+source_distribution=$(jq -er '.source.distribution' <<< "${payload}")
+
+>&2 echo "Fetching assets s:$source_system, a:$source_architecture, d:$source_distribution, v${version}"
+
+releases="$(curl -s https://www.mongodb.com/download-center/community/releases | tr '<' '\n' | sed -ne 's|^.*href="\([^"]*mongodb-[^"]*\.tgz\)">.*|\1|p')"
+
+if ! tarball_url="$(echo "$releases" | grep "$source_system-$source_architecture-$source_distribution-$version")"; then
+  echo "not found..."
+  exit 1
+fi
+echo "$tarball_url"
+
+pushd "${destination}" > /dev/null
+echo "${version}"       > version
+echo "${source_system}" > system
+echo "${source_architecture}" > architecture
+echo "${source_distribution}" > distribution
+
+if [[ -z ${tarball_url} ]]; then
+    echo >&2 "No such tarball available :("
+    exit 1
+fi
+
+echo >&2 "Downloading ${tarball_url}"
+curl  --silent --fail --show-error --location --remote-name \
+    --url "${tarball_url}"
+
+jq --null-input \
+    --arg "version" "${version}" \
+    '{ version: { version: $version } }' \
+    >&3
